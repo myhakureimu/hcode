@@ -39,9 +39,9 @@ parser.add_argument('--k', default=33, type=int)
 #model section
 parser.add_argument('--modelName', default='nano', type=str)
 parser.add_argument('--scale', default=1, type=int, help='scale')
-parser.add_argument('--num_heads', default=2*8, type=int, help='number of heads for multi-headed attention (default: 8)')
-parser.add_argument('--depth', default=2*8, type=int, help='depth of the transformer architecture (default: 12)')
-parser.add_argument('--embed_dim', default=128*16, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
+parser.add_argument('--num_heads', default=2*4, type=int, help='number of heads for multi-headed attention (default: 8)')
+parser.add_argument('--depth', default=2*4, type=int, help='depth of the transformer architecture (default: 12)')
+parser.add_argument('--embed_dim', default=128*8, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
 
 parser.add_argument('--llm_max_length', default=128, type=int, help='maximum sequence length of the input (default: 11)')
 
@@ -94,6 +94,24 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / (0.000001+self.count)
 
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma  # Focusing parameter
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        BCE_loss = nn.functional.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+        pt = torch.exp(-BCE_loss)  # pt is the prediction probability
+        focal_loss = (1 - pt) ** self.gamma * BCE_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+        
 if args.train == 'train1':
     print_index = [0,1,2,4,8,16,32]
 
@@ -106,7 +124,7 @@ def train_model(args, split, HManager, model, optimizer, epoch):
         dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
     
     
-    loss_f = torch.nn.BCEWithLogitsLoss(reduction = 'none')
+    loss_f = FocalLoss(reduction = 'none') #torch.nn.BCEWithLogitsLoss(reduction = 'none')
     
     if split in ['train1', 'train2']:
         batch_time = AverageMeter()
