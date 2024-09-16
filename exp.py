@@ -28,14 +28,14 @@ parser.add_argument('--wandb', default=1, type=int)
 parser.add_argument('--early_stop', default=0, type=int)
 
 #experiment aim
-parser.add_argument('--expName', default='Hypothesis Testing', type=str)
+parser.add_argument('--expName', default='Hypothesis Testing test', type=str)
 
 
 parser.add_argument('--train', default='train1', type=str)
 parser.add_argument('--n', default=8, type=int)
 parser.add_argument('--m', default=2**6, type=int)
 parser.add_argument('--k', default=9, type=int)
-print_index = [0,1,2,4,8]#,16,32]
+print_index = [0,1,2,4,8,16,32,64,128]
 
 #model section
 parser.add_argument('--modelName', default='nano', type=str)
@@ -44,7 +44,7 @@ parser.add_argument('--num_heads', default=2, type=int, help='number of heads fo
 parser.add_argument('--depth', default=2*4, type=int, help='depth of the transformer architecture (default: 12)')
 parser.add_argument('--embed_dim', default=128, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
 
-parser.add_argument('--llm_max_length', default=256, type=int, help='maximum sequence length of the input (default: 11)')
+parser.add_argument('--llm_max_length', default=512, type=int, help='maximum sequence length of the input (default: 11)')
 
 
 #optimization
@@ -61,8 +61,10 @@ parser.set_defaults(augment=True)
 args = parser.parse_args()
 
 args.num_heads = args.scale * args.num_heads
-args.depth     = args.scale * args.depth
+#args.depth     = args.scale * args.depth
 args.embed_dim = args.scale * args.embed_dim
+
+print_index = [x for x in print_index if x < args.k]
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 setproctitle.setproctitle(args.expName)
@@ -363,13 +365,13 @@ if 1:
         wandb.login(key='0e030fcc130348fb3127f6140ac82c773fa4b4d9')
         
         if args.train == 'train1':
-            name = f'method={args.train} + k={args.k}'
+            name = f'method={args.train} k={args.k} seed={args.random_seed}'
         if args.train == 'train2':
-            name = f'method={args.train}'
+            name = f'method={args.train} seed={args.random_seed}'
         run = wandb.init(
             # Set the project where this run will be logged
             project= f'{args.expName} n={args.n} m={args.m}|{2**args.n}',
-            name = f'method={args.train} + k={args.k}',
+            name = name,
             dir='../wandb',
             # Track hyperparameters and run metadata
             config={
