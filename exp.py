@@ -24,7 +24,7 @@ parser.add_argument('--SigmaRe', default=0, type=int)
 parser.add_argument('--NormAtt', default=0, type=int)
 parser.add_argument('--FirstLayerNorm', default=1, type=int)
 
-parser.add_argument('--wandb', default=0, type=int)
+parser.add_argument('--wandb', default=1, type=int)
 parser.add_argument('--early_stop', default=0, type=int)
 
 #experiment aim
@@ -33,8 +33,9 @@ parser.add_argument('--expName', default='Hypothesis Testing', type=str)
 
 parser.add_argument('--train', default='train1', type=str)
 parser.add_argument('--n', default=8, type=int)
-parser.add_argument('--m', default=2**4, type=int)
-parser.add_argument('--k', default=33, type=int)
+parser.add_argument('--m', default=2**6, type=int)
+parser.add_argument('--k', default=9, type=int)
+print_index = [0,1,2,4,8]#,16,32]
 
 #model section
 parser.add_argument('--modelName', default='nano', type=str)
@@ -50,7 +51,7 @@ parser.add_argument('--llm_max_length', default=256, type=int, help='maximum seq
 parser.add_argument('--lr', default=0.0005, type=float, help='initial model learning rate') #0.0005
 parser.add_argument('--wd', default=0.1, type=float, help='weight decay hyperparameter (default: 0.00001)')
 parser.add_argument('--batch_size', default=32, type=int, help='mini-batch size (default: 64)')
-parser.add_argument('--n_steps', default=1024, type=int, help='total number of training steps we want to run')
+parser.add_argument('--n_steps', default=512, type=int, help='total number of training steps we want to run')
 parser.add_argument('--epochs', default=5, type=int, help='number of total epochs to run')
 
 
@@ -166,16 +167,21 @@ class FocalLoss(nn.Module):
             return focal_loss
         
 if args.train == 'train1':
-    print_index = [0,1,2,4,8,16,32]
+    print_index = print_index
 
 def train_model(args, split, HManager, model, optimizer, epoch):
     if split == 'train1':
         dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
     if split == 'train2':
         dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
-    if split == 'test':
-        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
-    
+    if split == 'test1':
+        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=None)
+    if split == 'test2':
+        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=2)
+    if split == 'test4':
+        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=4)
+    if split == 'test8':
+        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=8)
     
     #loss_f = FocalLoss(reduction = 'none') #
     loss_f = torch.nn.BCEWithLogitsLoss(reduction = 'none')
@@ -187,7 +193,7 @@ def train_model(args, split, HManager, model, optimizer, epoch):
         batch_loss_icl = AverageMeter()
         batch_acc__icl = AverageMeter()
         model.train()
-    if split in ['test']:
+    if split in ['test1', 'test2', 'test4', 'test8']:
         batch_acc_ = AverageMeter()
         batch_acch = AverageMeter()
         model.eval()
@@ -196,9 +202,9 @@ def train_model(args, split, HManager, model, optimizer, epoch):
     if split in ['train1', 'train2']:
         for xs, ys, hs, idendify_xs, masks in (pbar := tqdm(dataloader)):
             #D[str(xs)+'=>'+str(ys)] = 0
-            
+            #print(masks.shape)
             xs, ys, hs, masks = xs.cuda(), ys.cuda(), hs.cuda(), masks.cuda()
-            xs = xs + 0.1*torch.randn(xs.shape).cuda()
+            xs = xs# + 0.1*torch.randn(xs.shape).cuda()
             hatys = model.forward2(xs, ys)
 
             # Calculate CE Loss
@@ -298,7 +304,8 @@ def train_model(args, split, HManager, model, optimizer, epoch):
                 print('valid/loss:', batch_loss_icl.avg)
                 print('valid/acc_:', batch_acc__icl.avg)
     
-    if split == 'test':
+
+    if split in ['test1', 'test2', 'test4', 'test8']:
         with torch.no_grad():
             for xs, ys, hs, idendify_xs, masks in (pbar := tqdm(dataloader)):
 
@@ -327,12 +334,12 @@ def train_model(args, split, HManager, model, optimizer, epoch):
                 pbar.set_description(f"test {batch_acc_.avg[0]:.3f} {batch_acch.avg[0]:.3f}")
 
             wandb_info={
-                "test_/acc_": batch_acc_.avg,
-                "test_/acch": batch_acch.avg,
+                split+"/acc_": batch_acc_.avg,
+                split+"/acch": batch_acch.avg,
                 }
             
-            wandb_info["test_/acc_"] = batch_acc_.avg
-            wandb_info["test_/acch"] = batch_acch.avg
+            wandb_info[split+"/acc_"] = batch_acc_.avg
+            wandb_info[split+"/acch"] = batch_acch.avg
 
     return wandb_info
 
@@ -355,15 +362,21 @@ if 1:
     if args.wandb:
         wandb.login(key='0e030fcc130348fb3127f6140ac82c773fa4b4d9')
         
+        if args.train == 'train1':
+            name = f'method={args.train} + k={args.k}'
+        if args.train == 'train2':
+            name = f'method={args.train}'
         run = wandb.init(
             # Set the project where this run will be logged
-            project= args.expName,
-            name=args.train,
+            project= f'{args.expName} n={args.n} m={args.m}|{2**args.n}',
+            name = f'method={args.train} + k={args.k}',
             dir='../wandb',
             # Track hyperparameters and run metadata
             config={
                 'n(feature)': args.n,
                 'm(subsample)': args.m,
+                'seed': args.random_seed,
+                'k': args.k,
                 'depth': args.depth,
                 'dim': args.embed_dim,
                 'heads': args.num_heads,
@@ -387,7 +400,8 @@ if 1:
         os.makedirs(folder)
     
     # Initialize the data loader
-    HManager = HDataLoader(n=args.n, m=args.m, k=args.k, n_steps=args.n_steps)
+    print(args.n, args.m, args.k, args.n_steps)
+    HManager = HDataLoader(n=args.n, m=args.m, random_seed=args.random_seed, k=args.k, n_steps=args.n_steps)
 
     
     # model
@@ -446,7 +460,19 @@ if 1:
             #    torch.save(state, state_file)
             
         if 1: #evaluation
-            split = 'test'
+            split = 'test1'
+            wandb_valid_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
+            if args.wandb:
+                wandb_valid_info['global_step'] = epoch
+                wandb.log(wandb_valid_info)
+            
+            split = 'test2'
+            wandb_valid_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
+            if args.wandb:
+                wandb_valid_info['global_step'] = epoch
+                wandb.log(wandb_valid_info)
+
+            split = 'test4'
             wandb_valid_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
             if args.wandb:
                 wandb_valid_info['global_step'] = epoch

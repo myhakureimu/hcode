@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 
 class HDataLoader:
-    def __init__(self, n, m, k, n_steps, prob_h=None, prob_x=None):
+    def __init__(self, n, m, random_seed, k, n_steps, prob_h=None, prob_x=None):
         """
         Initializes the HDataLoader with the specified parameters.
 
@@ -17,6 +17,7 @@ class HDataLoader:
         """
         self.n = n
         self.m = m
+        self.random_seed = random_seed
         self.k = k
         self.n_steps = n_steps
 
@@ -50,6 +51,7 @@ class HDataLoader:
             identifying_x_matrix = np.ones((num_all_h, num_all_feature), dtype=int)
         if self.m < (2 ** self.n):
             # calculate identifying_x_matrix
+            np.random.seed(self.random_seed)
             indices = np.random.choice(2 ** self.n, size=self.m, replace=False)
             h_matrix = h_matrix[indices, :]
             identifying_x_matrix = self._calculate_identifying_x(h_matrix)
@@ -427,13 +429,14 @@ class HDataLoader:
 if __name__ == '__main__':
     # Parameters
     n = 3  # Number of features per block
-    m = 4  # Number of subsample
+    m = 2**2  # Number of subsample
+    random_seed = 1
     k = 3  # Number of x-y pairs per sequence (used in train_dataloader1)
-    n_steps = 5  # Number of steps per epoch
-    batch_size = 2  # Number of h per batch
+    n_steps = 32  # Number of steps per epoch
+    batch_size = 512  # Number of h per batch
     
     # Initialize the data loader
-    data_loader = HDataLoader(n=n, m=m, k=k, n_steps=n_steps)
+    data_loader = HDataLoader(n=n, m=m, random_seed=random_seed, k=k, n_steps=n_steps)
     
     print(data_loader.h_matrix)
     print(data_loader.identifying_x_matrix)
@@ -452,23 +455,23 @@ if __name__ == '__main__':
 
     
     # Get train_dataloader2
-    dataloader = data_loader.get_pytorch_dataloader(batch_size=batch_size, dataloader_type='train2')
+    dataloader = data_loader.get_pytorch_dataloader(batch_size=batch_size, dataloader_type='train2', prefix_repeat=1)
     
     # Iterate through train_dataloader2
     print("-" * 40)
-    for x_batch, y_batch, h_batch, i_batch, mask_batch in dataloader:
+    #for x_batch, y_batch, h_batch, i_batch, mask_batch in dataloader:
         # print("X batch shape:", x_batch.shape)     # Shape: (batch_size, max_seq_len, total_features)
         # print("Y batch shape:", y_batch.shape)     # Shape: (batch_size, max_seq_len)
         # print("Mask batch shape:", mask_batch.shape)  # Shape: (batch_size, max_seq_len)
         # print("H batch shape:", h_batch.shape)     # Shape: (batch_size, total_features)
-        print("H batch:")
-        print(h_batch)
-        print("I batch:")
-        print(i_batch)
-        print("X batch:")
-        print(x_batch)
-        print("Y batch:")
-        print(y_batch)
-        print("Mask batch:")
-        print(mask_batch)
-        print("-" * 40)
+        # print("H batch:")
+        # print(h_batch)
+        # print("I batch:")
+        # print(i_batch)
+        # print("X batch:")
+        # print(x_batch)
+        # print("Y batch:")
+        # print(y_batch)
+        # print("Mask batch:")
+        # print(mask_batch.shape)
+        # print("-" * 40)
