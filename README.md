@@ -1,2 +1,1 @@
-# liu_codes_basic
-# hcode
+# hypothesis code
