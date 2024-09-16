@@ -2,15 +2,15 @@ import numpy as np
 import os
 gpuIdxStr = '0'
 
-random_seed = 2024
+random_seed = 2023
 
 prefix = f'python exp.py --gpu {gpuIdxStr} --random_seed {random_seed} --wandb 1'
 
 D = {
     4: [2,4],
-    #8: [4,8],
-    #12: [4,8,12],
-    #16: [4,8,12,16]
+    8: [4,8],
+    12: [4,8,12],
+    16: [4,8,12,16]
 }
 
 # Ensure the folder exists
