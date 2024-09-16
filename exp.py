@@ -32,18 +32,18 @@ parser.add_argument('--expName', default='Hypothesis Testing', type=str)
 
 
 parser.add_argument('--train', default='train1', type=str)
-parser.add_argument('--n', default=2, type=int)
-parser.add_argument('--m', default=2, type=int)
+parser.add_argument('--n', default=8, type=int)
+parser.add_argument('--m', default=2**4, type=int)
 parser.add_argument('--k', default=33, type=int)
 
 #model section
 parser.add_argument('--modelName', default='nano', type=str)
 parser.add_argument('--scale', default=1, type=int, help='scale')
-parser.add_argument('--num_heads', default=2*4, type=int, help='number of heads for multi-headed attention (default: 8)')
+parser.add_argument('--num_heads', default=2, type=int, help='number of heads for multi-headed attention (default: 8)')
 parser.add_argument('--depth', default=2*4, type=int, help='depth of the transformer architecture (default: 12)')
-parser.add_argument('--embed_dim', default=128*8, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
+parser.add_argument('--embed_dim', default=128, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
 
-parser.add_argument('--llm_max_length', default=128, type=int, help='maximum sequence length of the input (default: 11)')
+parser.add_argument('--llm_max_length', default=256, type=int, help='maximum sequence length of the input (default: 11)')
 
 
 #optimization
@@ -77,7 +77,60 @@ torch.backends.cudnn.benchmark = True
 #np.random.seed(args.random_seed)
 #random.seed(args.random_seed)
 
+def add(x, y):
+    """
+    Add two arrays `x` and `y` of possibly different sizes element-wise.
     
+    If both x and y exist at index i, z[i] = x[i] + y[i].
+    If only one exists, z[i] = x[i] or z[i] = y[i], whichever exists.
+    
+    Parameters:
+    - x (np.array): First array of size m.
+    - y (np.array): Second array of size n.
+    
+    Returns:
+    - np.array: The element-wise sum of x and y, with handling for different sizes.
+    """
+    # Convert x to a size-1 array if it is an int, float, or 0D tensor
+    if isinstance(x, (int, float)):
+        x = np.array([x])
+    elif isinstance(x, list):
+        x = np.array(x)
+    elif isinstance(x, torch.Tensor) and x.ndim == 0:  # Check for 0D tensor
+        x = np.array([x.cpu().item()])
+    elif isinstance(x, torch.Tensor):
+        x = x.cpu().numpy()
+
+    # Convert y to a size-1 array if it is an int, float, or 0D tensor
+    if isinstance(y, (int, float)):
+        y = np.array([y])
+    elif isinstance(y, list):
+        y = np.array(y)
+    elif isinstance(y, torch.Tensor) and y.ndim == 0:  # Check for 0D tensor
+        y = np.array([y.cpu().item()])
+    elif isinstance(y, torch.Tensor):
+        y = y.cpu().numpy()
+    
+    m = len(x)
+    n = len(y)
+    
+    # Create an output array z with the size of the longer array
+    z = np.zeros(max(m, n))
+    
+    # Add elements where both x and y exist
+    for i in range(min(m, n)):
+        z[i] = x[i] + y[i]
+    
+    # Copy remaining elements from x if x is longer
+    if m > n:
+        z[n:] = x[n:]
+    
+    # Copy remaining elements from y if y is longer
+    elif n > m:
+        z[m:] = y[m:]
+    
+    return z
+
 class AverageMeter(object):
     def __init__(self):
         self.reset()
@@ -90,8 +143,8 @@ class AverageMeter(object):
 
     def update(self, val, n=1):
         self.val = val
-        self.sum += val
-        self.count += n
+        self.sum = add(self.sum, val)
+        self.count = add(self.count, n)
         self.avg = self.sum / (0.000001+self.count)
 
 class FocalLoss(nn.Module):
@@ -124,7 +177,8 @@ def train_model(args, split, HManager, model, optimizer, epoch):
         dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
     
     
-    loss_f = FocalLoss(reduction = 'none') #torch.nn.BCEWithLogitsLoss(reduction = 'none')
+    #loss_f = FocalLoss(reduction = 'none') #
+    loss_f = torch.nn.BCEWithLogitsLoss(reduction = 'none')
     
     if split in ['train1', 'train2']:
         batch_time = AverageMeter()
@@ -140,9 +194,8 @@ def train_model(args, split, HManager, model, optimizer, epoch):
     
     #D = {}
     if split in ['train1', 'train2']:
-        for xs, ys, hs, masks in (pbar := tqdm(dataloader)):
+        for xs, ys, hs, idendify_xs, masks in (pbar := tqdm(dataloader)):
             #D[str(xs)+'=>'+str(ys)] = 0
-            pbar.set_description(f"train {batch_loss.avg:.3f} {batch_acc_.avg:.3f}")
             
             xs, ys, hs, masks = xs.cuda(), ys.cuda(), hs.cuda(), masks.cuda()
             xs = xs + 0.1*torch.randn(xs.shape).cuda()
@@ -167,6 +220,8 @@ def train_model(args, split, HManager, model, optimizer, epoch):
             # Record the loss and elapsed time
             batch_loss.update(loss.data)
             batch_acc_.update(acc_.data)
+            #print(loss_icl.shape)
+            #print(count_icl.shape)
             batch_loss_icl.update(loss_icl.data, count_icl.data)
             batch_acc__icl.update(acc__icl.data, count_icl.data)
 
@@ -176,6 +231,10 @@ def train_model(args, split, HManager, model, optimizer, epoch):
             loss.backward()
             optimizer.step()
 
+            #print(batch_loss.avg, batch_acc_.avg)
+            #print(batch_loss.avg[0], batch_acc_.avg[0])
+            pbar.set_description(f"train {batch_loss.avg[0]:.3f} {batch_acc_.avg[0]:.3f}")
+            
         wandb_info={
             "train/loss": batch_loss.avg,
             "train/acc_": batch_acc_.avg,
@@ -193,8 +252,7 @@ def train_model(args, split, HManager, model, optimizer, epoch):
     #print(D)
     if split in ['train1', 'train2']:
         with torch.no_grad():
-            for xs, ys, hs, masks in (pbar := tqdm(dataloader)):
-                pbar.set_description(f"train {batch_loss.avg:.3f} {batch_acc_.avg:.3f}")
+            for xs, ys, hs, idendify_xs, masks in (pbar := tqdm(dataloader)):
                 
                 xs, ys, hs, masks = xs.cuda(), ys.cuda(), hs.cuda(), masks.cuda()
                 
@@ -223,6 +281,8 @@ def train_model(args, split, HManager, model, optimizer, epoch):
                 # model.zero_grad()
                 # loss.backward()
                 # optimizer.step()
+
+                pbar.set_description(f"train {batch_loss.avg[0]:.3f} {batch_acc_.avg[0]:.3f}")
         
             wandb_info={
                 "valid/loss": batch_loss.avg,
@@ -240,7 +300,7 @@ def train_model(args, split, HManager, model, optimizer, epoch):
     
     if split == 'test':
         with torch.no_grad():
-            for xs, ys, hs, masks in (pbar := tqdm(dataloader)):
+            for xs, ys, hs, idendify_xs, masks in (pbar := tqdm(dataloader)):
 
                 xs, ys, hs, masks = xs.cuda(), ys.cuda(), hs.cuda(), masks.cuda()
                 #print(hs)
@@ -264,7 +324,8 @@ def train_model(args, split, HManager, model, optimizer, epoch):
                 batch_acc_.update(acc_.data)
                 batch_acch.update(acch.data)
 
-                pbar.set_description(f"test {batch_acc_.avg:.3f} {batch_acch.avg:.3f}")
+                pbar.set_description(f"test {batch_acc_.avg[0]:.3f} {batch_acch.avg[0]:.3f}")
+
             wandb_info={
                 "test_/acc_": batch_acc_.avg,
                 "test_/acch": batch_acch.avg,
@@ -301,8 +362,8 @@ if 1:
             dir='../wandb',
             # Track hyperparameters and run metadata
             config={
-                'm(fperb)': args.m,
-                'n(block)': args.n,
+                'n(feature)': args.n,
+                'm(subsample)': args.m,
                 'depth': args.depth,
                 'dim': args.embed_dim,
                 'heads': args.num_heads,
@@ -336,7 +397,7 @@ if 1:
                                  n_head=args.num_heads, special_dimension=True)
     if args.modelName == 'nano': #nanoGPT
         config = GPTConfig(
-            input_dim = args.m * args.n + 1,
+            input_dim = args.n + 1,
             block_size = args.llm_max_length,
             #vocab_size = 50304, # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
             n_layer = args.depth,

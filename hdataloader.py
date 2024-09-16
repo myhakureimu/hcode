@@ -9,7 +9,7 @@ class HDataLoader:
 
         Parameters:
         - n (int): Number of features per block.
-        - m (int): Number of blocks.
+        - m (float): subsample m hypothesis from all 2^n possibility
         - k (int): Number of x-y pairs per sequence (used in train_dataloader1).
         - n_steps (int): Number of steps per epoch.
         - prob_h (np.array): Optional custom probability vector for h.
@@ -34,37 +34,77 @@ class HDataLoader:
         """
         Generates the h matrix and the identifying x matrix.
         """
-        num_h_per_block = 2 ** self.n - 2  # Excluding the all-zero vector
+        num_all_feature = self.n
+        num_all_h = 2 ** self.n  # In Excluding the all-zero and all-one vector
         h_list = []
 
-        # Generate all binary combinations of length n, excluding the all-zero vector
-        for i in range(1, 2 ** self.n-1):
+        # Generate all binary combinations of length n
+        for i in range(0, 2 ** self.n):
             # Convert i to a binary vector of length n
             bin_str = format(i, '0' + str(self.n) + 'b')
             h = [int(bit) for bit in bin_str]
             h_list.append(h)
-        block = np.array(h_list)  # Shape: (2^n - 2, n)
+        h_matrix = np.array(h_list)  # Shape: (2^n, n)
 
-        total_h = self.m * num_h_per_block
-        total_features = self.n * self.m
-        h_matrix = np.zeros((total_h, total_features), dtype=int)
-        identifying_x_matrix = np.zeros((total_h, total_features), dtype=int)
-
-        for i in range(self.m):
-            # Calculate indices for placing the block in the matrices
-            h_start = i * num_h_per_block
-            h_end = (i + 1) * num_h_per_block
-            feature_start = i * self.n
-            feature_end = (i + 1) * self.n
-
-            # Place the block into the h matrix
-            h_matrix[h_start:h_end, feature_start:feature_end] = block
-
-            # Fill the identifying x matrix with 1s in the block positions
-            identifying_block = np.ones((num_h_per_block, self.n), dtype=int)
-            identifying_x_matrix[h_start:h_end, feature_start:feature_end] = identifying_block
-
+        if self.m == (2 ** self.n):
+            identifying_x_matrix = np.ones((num_all_h, num_all_feature), dtype=int)
+        if self.m < (2 ** self.n):
+            # calculate identifying_x_matrix
+            indices = np.random.choice(2 ** self.n, size=self.m, replace=False)
+            h_matrix = h_matrix[indices, :]
+            identifying_x_matrix = self._calculate_identifying_x(h_matrix)
         return h_matrix, identifying_x_matrix
+    
+    def _calculate_identifying_x(self, h_matrix):
+        """
+        Calculate the identifying_x_matrix using a greedy approach where for each hypothesis,
+        the feature that distinguishes it from the most other hypotheses is selected at each step.
+
+        Parameters:
+        - h_matrix (np.array): The matrix of hypothesis functions (2^n rows, n columns).
+
+        Returns:
+        - identifying_x_matrix (np.array): A binary matrix where 1 indicates that 
+          the feature (column) is necessary for distinguishing that hypothesis (row).
+        """
+        num_h, num_features = h_matrix.shape
+        identifying_x_matrix = np.zeros_like(h_matrix, dtype=int)  # Start with a zero matrix
+
+        # For each hypothesis (row in h_matrix)
+        for i in range(num_h):
+            remaining_hypotheses = set(range(num_h))  # Set of all hypotheses
+            remaining_hypotheses.remove(i)  # Remove the current hypothesis from the set
+
+            # Track the features chosen for hypothesis i
+            chosen_features = set()
+
+            # Continue until all other hypotheses are distinguished
+            while remaining_hypotheses:
+                best_feature = None
+                max_distinguished = 0
+
+                # Try every feature and see which one distinguishes the most remaining hypotheses
+                for feature in range(num_features):
+                    if feature in chosen_features:
+                        continue  # Skip features already chosen
+
+                    # Count how many remaining hypotheses would be distinguished by this feature
+                    distinguished = {j for j in remaining_hypotheses if h_matrix[i, feature] != h_matrix[j, feature]}
+
+                    if len(distinguished) > max_distinguished:
+                        max_distinguished = len(distinguished)
+                        best_feature = feature
+
+                if best_feature is not None:
+                    # Add the best feature to the chosen set and mark it in identifying_x_matrix
+                    chosen_features.add(best_feature)
+                    identifying_x_matrix[i, best_feature] = 1
+
+                    # Remove distinguished hypotheses from the remaining set
+                    distinguished = {j for j in remaining_hypotheses if h_matrix[i, best_feature] != h_matrix[j, best_feature]}
+                    remaining_hypotheses -= distinguished
+
+        return identifying_x_matrix
 
     def _create_probability_vectors(self, prob_h, prob_x):
         """
@@ -173,6 +213,7 @@ class HDataLoader:
                 x_batch = []
                 y_batch = []
                 h_batch = []
+                i_batch = []
                 mask_batch = []
 
                 for idx in indices:
@@ -220,6 +261,7 @@ class HDataLoader:
                         x_batch.append(x_seq)
                         y_batch.append(y_seq)
                         h_batch.append(h)
+                        i_batch.append(identifying_x)
                         mask_batch.append(mask_seq)
 
                 # Convert sequences to tensors
@@ -227,9 +269,10 @@ class HDataLoader:
                 x_batch = torch.tensor(np.array(x_batch), dtype=torch.float32)
                 y_batch = torch.tensor(np.array(y_batch), dtype=torch.float32)
                 h_batch = torch.tensor(np.array(h_batch), dtype=torch.float32)
+                i_batch = torch.tensor(np.array(i_batch), dtype=torch.float32)
                 mask_batch = torch.tensor(np.array(mask_batch), dtype=torch.float32)
 
-                return x_batch, y_batch, h_batch, mask_batch
+                return x_batch, y_batch, h_batch, i_batch, mask_batch
 
         elif dataloader_type == 'train1':
             # Original data loader (train_dataloader1)
@@ -237,10 +280,13 @@ class HDataLoader:
                 x_batch = []
                 y_batch = []
                 h_batch = []
+                i_batch = []
                 for idx in indices:
                     # Get the h
                     h = self.h_matrix[idx]
+                    identifying_x = self.identifying_x_matrix[idx]
                     h_batch.append(h)  # Collect h for the batch
+                    i_batch.append(identifying_x)  # Collect h for the batch
 
                     # Sample k feature indices according to prob_x with replacement
                     feature_indices = np.random.choice(
@@ -271,8 +317,9 @@ class HDataLoader:
                 x_batch = torch.tensor(np.array(x_batch), dtype=torch.float32)  # Shape: (batch_size, k, total_features)
                 y_batch = torch.tensor(np.array(y_batch), dtype=torch.float32)  # Shape: (batch_size, k)
                 h_batch = torch.tensor(np.array(h_batch), dtype=torch.float32)  # Shape: (batch_size, total_features)
+                i_batch = torch.tensor(np.array(i_batch), dtype=torch.float32)  # Shape: (batch_size, total_features)
 
-                return x_batch, y_batch, h_batch, torch.ones(y_batch.shape)
+                return x_batch, y_batch, h_batch, i_batch, torch.ones(y_batch.shape)
 
         elif dataloader_type == 'train2':
             # Extended data loader (train_dataloader2)
@@ -280,6 +327,7 @@ class HDataLoader:
                 x_batch = []
                 y_batch = []
                 h_batch = []
+                i_batch = []
                 mask_batch = []
                 for idx in indices:
                     # Get the h and identifying_x for this h
@@ -287,6 +335,7 @@ class HDataLoader:
                     identifying_x = self.identifying_x_matrix[idx]
 
                     h_batch.append(h)  # Collect h for the batch
+                    i_batch.append(identifying_x)
 
                     # Get indices where identifying_x is 1
                     feature_indices = np.where(identifying_x == 1)[0]
@@ -358,7 +407,7 @@ class HDataLoader:
                 mask_batch = torch.tensor(np.array(mask_batch_padded), dtype=torch.float32)  # Shape: (batch_size, max_seq_len)
                 h_batch = torch.tensor(np.array(h_batch), dtype=torch.float32)  # Shape: (batch_size, total_features)
 
-                return x_batch, y_batch, h_batch, mask_batch #torch.ones(y_batch.shape)# 
+                return x_batch, y_batch, h_batch, i_batch, mask_batch #torch.ones(y_batch.shape)# 
 
         else:
             raise ValueError("Invalid dataloader_type. Must be 'train1', 'train2', or 'test'.")
@@ -377,8 +426,8 @@ class HDataLoader:
 
 if __name__ == '__main__':
     # Parameters
-    n = 2  # Number of features per block
-    m = 1  # Number of blocks
+    n = 3  # Number of features per block
+    m = 4  # Number of subsample
     k = 3  # Number of x-y pairs per sequence (used in train_dataloader1)
     n_steps = 5  # Number of steps per epoch
     batch_size = 2  # Number of h per batch
@@ -386,6 +435,8 @@ if __name__ == '__main__':
     # Initialize the data loader
     data_loader = HDataLoader(n=n, m=m, k=k, n_steps=n_steps)
     
+    print(data_loader.h_matrix)
+    print(data_loader.identifying_x_matrix)
     # Optionally, set custom probability vectors
     '''
     prob_h = np.ones(data_loader.total_h)
@@ -398,21 +449,26 @@ if __name__ == '__main__':
     
     data_loader.set_probability_vectors(prob_h=prob_h, prob_x=prob_x)
     '''
+
+    
     # Get train_dataloader2
     dataloader = data_loader.get_pytorch_dataloader(batch_size=batch_size, dataloader_type='train2')
     
     # Iterate through train_dataloader2
-    for x_batch, y_batch, h_batch, mask_batch in dataloader:
-        print("X batch shape:", x_batch.shape)     # Shape: (batch_size, max_seq_len, total_features)
-        print("Y batch shape:", y_batch.shape)     # Shape: (batch_size, max_seq_len)
-        print("Mask batch shape:", mask_batch.shape)  # Shape: (batch_size, max_seq_len)
-        print("H batch shape:", h_batch.shape)     # Shape: (batch_size, total_features)
+    print("-" * 40)
+    for x_batch, y_batch, h_batch, i_batch, mask_batch in dataloader:
+        # print("X batch shape:", x_batch.shape)     # Shape: (batch_size, max_seq_len, total_features)
+        # print("Y batch shape:", y_batch.shape)     # Shape: (batch_size, max_seq_len)
+        # print("Mask batch shape:", mask_batch.shape)  # Shape: (batch_size, max_seq_len)
+        # print("H batch shape:", h_batch.shape)     # Shape: (batch_size, total_features)
+        print("H batch:")
+        print(h_batch)
+        print("I batch:")
+        print(i_batch)
         print("X batch:")
         print(x_batch)
         print("Y batch:")
         print(y_batch)
         print("Mask batch:")
         print(mask_batch)
-        print("H batch:")
-        print(h_batch)
         print("-" * 40)
