@@ -28,7 +28,7 @@ parser.add_argument('--wandb', default=1, type=int)
 parser.add_argument('--early_stop', default=0, type=int)
 
 #experiment aim
-parser.add_argument('--expName', default='Hypothesis Testing test', type=str)
+parser.add_argument('--expName', default='H ICL', type=str)
 
 
 parser.add_argument('--train', default='train1', type=str)
@@ -42,7 +42,7 @@ parser.add_argument('--modelName', default='nano', type=str)
 parser.add_argument('--scale', default=1, type=int, help='scale')
 parser.add_argument('--num_heads', default=2, type=int, help='number of heads for multi-headed attention (default: 8)')
 parser.add_argument('--depth', default=2*4, type=int, help='depth of the transformer architecture (default: 12)')
-parser.add_argument('--embed_dim', default=128, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
+parser.add_argument('--embed_dim', default=128*8, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
 
 parser.add_argument('--llm_max_length', default=512, type=int, help='maximum sequence length of the input (default: 11)')
 
@@ -52,7 +52,7 @@ parser.add_argument('--lr', default=0.0005, type=float, help='initial model lear
 parser.add_argument('--wd', default=0.1, type=float, help='weight decay hyperparameter (default: 0.00001)')
 parser.add_argument('--batch_size', default=32, type=int, help='mini-batch size (default: 64)')
 parser.add_argument('--n_steps', default=512, type=int, help='total number of training steps we want to run')
-parser.add_argument('--epochs', default=5, type=int, help='number of total epochs to run')
+parser.add_argument('--epochs', default=16, type=int, help='number of total epochs to run')
 
 
 parser.set_defaults(augment=True)
@@ -379,6 +379,7 @@ if 1:
                 'm(subsample)': args.m,
                 'seed': args.random_seed,
                 'k': args.k,
+                'train': args.train,
                 'depth': args.depth,
                 'dim': args.embed_dim,
                 'heads': args.num_heads,
