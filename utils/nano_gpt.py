@@ -183,7 +183,23 @@ class GPTConfig:
     SigmaRe: int = 0
     NormAtt: int = 0
     FirstLayerNorm: int = 0
-    
+
+def binary2onehot(input_tensor):
+    """
+    Converts a binary tensor of shape (batch_size, points, 1) to a one-hot tensor of shape (batch_size, points, 2),
+    mapping 0 to [1, 0] and 1 to [0, 1].
+    """
+    # Remove the last dimension
+    input_tensor = input_tensor.squeeze(-1)  # Shape: (batch_size, points)
+
+    # Ensure the tensor is of integer type
+    input_tensor = input_tensor.long()
+
+    # One-hot encode
+    one_hot = torch.nn.functional.one_hot(input_tensor, num_classes=2)  # Shape: (batch_size, points, 2)
+
+    return one_hot
+
 class NanoGPT(nn.Module):
 
     def __init__(self, config):
@@ -205,7 +221,7 @@ class NanoGPT(nn.Module):
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
         #self._read_out = nn.Linear(config.n_embd, 2)
-        self._read_out = nn.Linear(config.n_embd, 1, bias=False)
+        self._read_out = nn.Linear(config.n_embd, config.input_dim, bias=False)
         #self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -283,16 +299,26 @@ class NanoGPT(nn.Module):
             axis=2,
         )
         '''
-        zs = torch.stack((torch.cat([xs_b,                                               # x
-                                     torch.zeros([bsize, points, 1], device=ys_b.device) # y
+        # zs = torch.stack((torch.cat([xs_b,                                               # x
+        #                              torch.zeros([bsize, points, 1], device=ys_b.device) # y
+        #                              ], dim=2), # x
+        #                   torch.cat([torch.zeros_like(xs_b, device=ys_b.device),         # x
+        #                              ys_b.view(bsize, points, 1)                         # y
+        #                              ], dim=2)
+        #                   ), dim=2)
+        #print('forward')
+        #print(xs_b.shape)
+        #print(ys_b.shape)
+        zs = torch.stack((torch.cat([torch.zeros([bsize, points, 2], device=ys_b.device), # y
+                                     xs_b,                                               # x
                                      ], dim=2), # x
-                          torch.cat([torch.zeros_like(xs_b, device=ys_b.device),         # x
-                                     ys_b.view(bsize, points, 1)                         # y
+                          torch.cat([binary2onehot(ys_b),                                # y
+                                     torch.zeros_like(xs_b, device=ys_b.device)          # x
                                      ], dim=2)
                           ), dim=2)
-        
-        zs = zs.view(bsize, 2 * points, dim+1)
-        
+
+        zs = zs.view(bsize, 2 * points, dim+2)
+        #print(zs.shape)
         return zs
     
     def forward2(self, xs, ys, inds=None):
@@ -317,7 +343,7 @@ class NanoGPT(nn.Module):
         x = self.transformer.ln_f(x)
         
         prediction = self._read_out(x)
-        return prediction[:, 0::2, -1]#[:, inds]
+        return prediction[:, 0::2, :]#[:, inds]
 
     # def forward3(self, xs, ys, inds=None, attention_mask=None):
     #     #if inds is None:

@@ -1,6 +1,22 @@
 import torch
 import torch.nn as nn
 
+def binary2onehot(input_tensor):
+    """
+    Converts a binary tensor of shape (batch_size, points, 1) to a one-hot tensor of shape (batch_size, points, 2),
+    mapping 0 to [1, 0] and 1 to [0, 1].
+    """
+    # Remove the last dimension
+    input_tensor = input_tensor.squeeze(-1)  # Shape: (batch_size, points)
+
+    # Ensure the tensor is of integer type
+    input_tensor = input_tensor.long()
+
+    # One-hot encode
+    one_hot = torch.nn.functional.one_hot(input_tensor, num_classes=2)  # Shape: (batch_size, points, 2)
+
+    return one_hot
+
 class PytorchTransformer(nn.Module):
     def __init__(self, i_dimensions, h_dimensions, o_dimensions, num_layers=6, num_heads=8, dropout=0.1, max_seq_length=5000):
         super(PytorchTransformer, self).__init__()
@@ -35,15 +51,26 @@ class PytorchTransformer(nn.Module):
             axis=2,
         )
         '''
-        zs = torch.stack((torch.cat([xs_b*2-1,                                               # x
-                                     torch.zeros([bsize, points, 1], device=ys_b.device) # y
+        # zs = torch.stack((torch.cat([xs_b,                                               # x
+        #                              torch.zeros([bsize, points, 1], device=ys_b.device) # y
+        #                              ], dim=2), # x
+        #                   torch.cat([torch.zeros_like(xs_b, device=ys_b.device),         # x
+        #                              ys_b.view(bsize, points, 1)                         # y
+        #                              ], dim=2)
+        #                   ), dim=2)
+        #print('forward')
+        #print(xs_b.shape)
+        #print(ys_b.shape)
+        zs = torch.stack((torch.cat([torch.zeros([bsize, points, 2], device=ys_b.device), # y
+                                     xs_b,                                               # x
                                      ], dim=2), # x
-                          torch.cat([torch.zeros_like(xs_b, device=ys_b.device),         # x
-                                     ys_b.view(bsize, points, 1)*2-1                         # y
+                          torch.cat([binary2onehot(ys_b),                                # y
+                                     torch.zeros_like(xs_b, device=ys_b.device)          # x
                                      ], dim=2)
                           ), dim=2)
+
+        zs = zs.view(bsize, 2 * points, dim+2)
         #print(zs.shape)
-        zs = zs.view(bsize, 2 * points, dim+1)
         return zs
     
     def forward2(self, xs, ys):
@@ -84,7 +111,7 @@ class PytorchTransformer(nn.Module):
         # Project back to original dimension K
         output = self.output_layer(output)  # Shape: (batch_size, seq_length, K)
 
-        return output[:, 0::2, 0]
+        return output[:, 0::2, :]
 
 def generate_causal_mask(seq_length, device):
     """

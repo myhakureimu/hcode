@@ -32,9 +32,9 @@ parser.add_argument('--expName', default='H', type=str)
 
 
 parser.add_argument('--train', default='train1', type=str)
-parser.add_argument('--n', default=4, type=int)
-parser.add_argument('--m', default=2**4, type=int)
-parser.add_argument('--k', default=33, type=int)
+parser.add_argument('--n', default=2, type=int)
+parser.add_argument('--m', default=2**2, type=int)
+parser.add_argument('--k', default=3, type=int)
 print_index = [0,1,2,4,8,16,32,64,128]
 
 #model section
@@ -45,13 +45,13 @@ parser.add_argument('--depth', default=2*4, type=int, help='depth of the transfo
 parser.add_argument('--embed_dim', default=128*8, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
 parser.add_argument('--dropout', default=0.0, type=float, help='dropout')
 
-parser.add_argument('--llm_max_length', default=512, type=int, help='maximum sequence length of the input (default: 11)')
+parser.add_argument('--llm_max_length', default=256, type=int, help='maximum sequence length of the input (default: 11)')
 
 
 #optimization
-parser.add_argument('--lr', default=0.0005, type=float, help='initial model learning rate') #0.0005
+parser.add_argument('--lr', default=0.005, type=float, help='initial model learning rate') #0.0005
 parser.add_argument('--wd', default=0.0001, type=float, help='weight decay hyperparameter (default: 0.00001)') #0.1
-parser.add_argument('--batch_size', default=4, type=int, help='mini-batch size (default: 64)') #32
+parser.add_argument('--batch_size', default=32, type=int, help='mini-batch size (default: 64)') #32
 parser.add_argument('--n_steps', default=512, type=int, help='total number of training steps we want to run')
 parser.add_argument('--epochs', default=16, type=int, help='number of total epochs to run')
 
@@ -176,11 +176,6 @@ class FocalLoss(nn.Module):
 if args.train == 'train1':
     print_index = print_index
 
-def binary2onehot(binary_vector):
-    one_hot_encoded = np.zeros((binary_vector.size, 2))
-    one_hot_encoded[np.arange(binary_vector.size), binary_vector] = 1
-    return one_hot_encoded
-
 def train_model(args, split, HManager, model, optimizer, epoch):
     if split == 'train1':
         dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
@@ -196,7 +191,8 @@ def train_model(args, split, HManager, model, optimizer, epoch):
         dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=8)
     
     #loss_f = FocalLoss(reduction = 'none') #
-    loss_f = torch.nn.BCEWithLogitsLoss(reduction = 'none')
+    #loss_f = torch.nn.BCEWithLogitsLoss(reduction = 'none')
+    loss_f = torch.nn.CrossEntropyLoss(reduction = 'none')
     
     if split in ['train1', 'train2']:
         batch_time = AverageMeter()
@@ -223,19 +219,23 @@ def train_model(args, split, HManager, model, optimizer, epoch):
             hatys = model.forward2(xs, ys)
 
             # Calculate CE Loss
-            # print('hatys', hatys.shape)
-            # print('ys', ys.shape)
-            losses = loss_f(hatys, ys)
-            # print('losses', losses.shape)
+            #print('hatys', hatys.shape)
+            #print('ys', ys.shape)
+            #losses = loss_f(hatys, ys) # for BCEWithLogitsLoss
+            losses = loss_f(hatys.transpose(1, 2) , ys.long())
+            #print('losses', losses.shape)
             # print('masks', masks.shape)
             #loss = torch.sum(losses)
             # print(masks)
             loss = torch.sum(losses              *masks)/torch.sum(masks)
             # print('(hatys >= 0) == ys)', ((hatys >= 0) == ys).shape)
-            acc_ = torch.sum(((hatys >= 0) == ys)*masks)/torch.sum(masks)
+
+            #correct = ((hatys >= 0) == ys) # for BCEWithLogitsLoss
+            correct = (torch.argmax(hatys, dim=2) == ys)
+            acc_ = torch.sum(correct*masks)/torch.sum(masks) 
             with torch.no_grad():
-                loss_icl = torch.sum(losses              *masks, dim=0)
-                acc__icl = torch.sum(((hatys >= 0) == ys)*masks, dim=0)
+                loss_icl = torch.sum(losses *masks, dim=0)
+                acc__icl = torch.sum(correct*masks, dim=0)
                 count_icl = torch.sum(masks, dim=0)
                 
             # Record the loss and elapsed time
@@ -283,12 +283,16 @@ def train_model(args, split, HManager, model, optimizer, epoch):
                 hatys = model.forward2(xs, ys)
                 
                 # Calculate CE Loss
-                losses = loss_f(hatys, ys)
+                #losses = loss_f(hatys, ys) # for BCEWithLogitsLoss
+                losses = loss_f(hatys.transpose(1, 2) , ys.long())
+
                 loss = torch.sum(losses              *masks)/torch.sum(masks)
-                acc_ = torch.sum(((hatys >= 0) == ys)*masks)/torch.sum(masks)
+                #correct = ((hatys >= 0) == ys) # for BCEWithLogitsLoss
+                correct = (torch.argmax(hatys, dim=2) == ys)
+                acc_ = torch.sum(correct*masks)/torch.sum(masks) 
                 with torch.no_grad():
-                    loss_icl = torch.sum(losses              *masks, dim=0)
-                    acc__icl = torch.sum(((hatys >= 0) == ys)*masks, dim=0)
+                    loss_icl = torch.sum(losses *masks, dim=0)
+                    acc__icl = torch.sum(correct*masks, dim=0)
                     count_icl = torch.sum(masks, dim=0)
                     
                 # Record the loss and elapsed time
@@ -438,7 +442,7 @@ if 1:
                                  n_head=args.num_heads, special_dimension=True)
     if args.modelName == 'nano': #nanoGPT
         config = GPTConfig(
-            input_dim = args.n + 1,
+            input_dim = args.n + 2,
             block_size = args.llm_max_length,
             #vocab_size = 50304, # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
             n_layer = args.depth,
@@ -453,9 +457,9 @@ if 1:
         model = NanoGPT(config)
     if args.modelName == 'pytorch':
         model = PytorchTransformer(
-            i_dimensions = args.n + 1, 
+            i_dimensions = args.n + 2, 
             h_dimensions = args.embed_dim, 
-            o_dimensions = 1, 
+            o_dimensions = args.n + 2, 
             num_layers = args.depth, 
             num_heads = args.num_heads, 
             dropout = args.dropout,
@@ -495,7 +499,7 @@ if 1:
             #             "train_epoch": epoch}
             #    torch.save(state, state_file)
 
-        if 1: #evaluation
+        if 0: #evaluation
             split = 'test1'
             wandb_valid_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
             if args.wandb:
