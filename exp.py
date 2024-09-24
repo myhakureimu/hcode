@@ -20,21 +20,21 @@ parser.add_argument('--gpu', default='0', type=str, help='which gpus to use')
 parser.add_argument('--random_seed', default=1, type=int, help='the seed used for torch & numpy')
 
 #arxived args
-parser.add_argument('--SigmaRe', default=0, type=int)
+parser.add_argument('--SigmaRe', default=2, type=int)
 parser.add_argument('--NormAtt', default=0, type=int)
 parser.add_argument('--FirstLayerNorm', default=1, type=int)
 
-parser.add_argument('--wandb', default=1, type=int)
+parser.add_argument('--wandb', default=0, type=int)
 parser.add_argument('--early_stop', default=0, type=int)
 
 #experiment aim
-parser.add_argument('--expName', default='H ICL', type=str)
+parser.add_argument('--expName', default='H', type=str)
 
 
 parser.add_argument('--train', default='train1', type=str)
-parser.add_argument('--n', default=8, type=int)
-parser.add_argument('--m', default=2**6, type=int)
-parser.add_argument('--k', default=9, type=int)
+parser.add_argument('--n', default=4, type=int)
+parser.add_argument('--m', default=2**4, type=int)
+parser.add_argument('--k', default=33, type=int)
 print_index = [0,1,2,4,8,16,32,64,128]
 
 #model section
@@ -43,14 +43,15 @@ parser.add_argument('--scale', default=1, type=int, help='scale')
 parser.add_argument('--num_heads', default=2, type=int, help='number of heads for multi-headed attention (default: 8)')
 parser.add_argument('--depth', default=2*4, type=int, help='depth of the transformer architecture (default: 12)')
 parser.add_argument('--embed_dim', default=128*8, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
+parser.add_argument('--dropout', default=0.0, type=float, help='dropout')
 
 parser.add_argument('--llm_max_length', default=512, type=int, help='maximum sequence length of the input (default: 11)')
 
 
 #optimization
 parser.add_argument('--lr', default=0.0005, type=float, help='initial model learning rate') #0.0005
-parser.add_argument('--wd', default=0.1, type=float, help='weight decay hyperparameter (default: 0.00001)')
-parser.add_argument('--batch_size', default=32, type=int, help='mini-batch size (default: 64)')
+parser.add_argument('--wd', default=0.0001, type=float, help='weight decay hyperparameter (default: 0.00001)') #0.1
+parser.add_argument('--batch_size', default=4, type=int, help='mini-batch size (default: 64)') #32
 parser.add_argument('--n_steps', default=512, type=int, help='total number of training steps we want to run')
 parser.add_argument('--epochs', default=16, type=int, help='number of total epochs to run')
 
@@ -71,8 +72,12 @@ setproctitle.setproctitle(args.expName)
 
 import torch
 import torch.nn as nn
-from utils import TransformerModel, FlexDataset
-from utils.nano_gpt import GPTConfig, NanoGPT
+if 0:
+    from utils import TransformerModel, FlexDataset
+if args.modelName == 'nano':
+    from utils.nano_gpt import GPTConfig, NanoGPT
+if args.modelName == 'pytorch':
+    from utils.pytorch_transformer import PytorchTransformer
 
 # Seeding programmatic sources of randomness
 torch.backends.cudnn.benchmark = True
@@ -171,6 +176,11 @@ class FocalLoss(nn.Module):
 if args.train == 'train1':
     print_index = print_index
 
+def binary2onehot(binary_vector):
+    one_hot_encoded = np.zeros((binary_vector.size, 2))
+    one_hot_encoded[np.arange(binary_vector.size), binary_vector] = 1
+    return one_hot_encoded
+
 def train_model(args, split, HManager, model, optimizer, epoch):
     if split == 'train1':
         dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
@@ -203,6 +213,9 @@ def train_model(args, split, HManager, model, optimizer, epoch):
     #D = {}
     if split in ['train1', 'train2']:
         for xs, ys, hs, idendify_xs, masks in (pbar := tqdm(dataloader)):
+            # print(hs)
+            # print(xs)
+            # print(ys)
             #D[str(xs)+'=>'+str(ys)] = 0
             #print(masks.shape)
             xs, ys, hs, masks = xs.cuda(), ys.cuda(), hs.cuda(), masks.cuda()
@@ -290,7 +303,7 @@ def train_model(args, split, HManager, model, optimizer, epoch):
                 # loss.backward()
                 # optimizer.step()
 
-                pbar.set_description(f"train {batch_loss.avg[0]:.3f} {batch_acc_.avg[0]:.3f}")
+                pbar.set_description(f"valid {batch_loss.avg[0]:.3f} {batch_acc_.avg[0]:.3f}")
         
             wandb_info={
                 "valid/loss": batch_loss.avg,
@@ -353,7 +366,8 @@ if 1:
     model_hypers = 'modelName='+str(args.modelName) \
              +'_'+ 'depth='+str(args.depth) \
              +'_'+ 'dim='+str(args.embed_dim) \
-             +'_'+ 'heads='+str(args.num_heads)
+             +'_'+ 'heads='+str(args.num_heads) \
+             +'_'+ 'drop='+str(args.dropout)
     optim_hypers = 'lr='+str(args.lr) \
              +'_'+ 'wd='+str(args.wd) \
              +'_'+ 'BS='+str(args.batch_size) \
@@ -383,6 +397,7 @@ if 1:
                 'depth': args.depth,
                 'dim': args.embed_dim,
                 'heads': args.num_heads,
+                'dropout': args.dropout,
                 'lr': args.lr,
                 'wd': args.wd,
                 'BS': args.batch_size,
@@ -406,6 +421,15 @@ if 1:
     print(args.n, args.m, args.k, args.n_steps)
     HManager = HDataLoader(n=args.n, m=args.m, random_seed=args.random_seed, k=args.k, n_steps=args.n_steps)
 
+    alpha = [1]*HManager.total_h
+    prob_h = np.random.dirichlet(alpha, size=None)
+    print(prob_h)
+
+    alpha = [1]*HManager.total_features
+    prob_x = np.random.dirichlet(alpha, size=None)
+    print(prob_h)
+    
+    HManager.set_probability_vectors(prob_h=prob_h, prob_x=prob_x)
     
     # model
     if 0: #GPT2
@@ -420,16 +444,25 @@ if 1:
             n_layer = args.depth,
             n_head = args.num_heads,
             n_embd = args.embed_dim,
-            dropout = 0.0,
+            dropout = args.dropout,
             bias = True, # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
             SigmaRe = args.SigmaRe,
             NormAtt = args.NormAtt,
             FirstLayerNorm = args.FirstLayerNorm,
         )
         model = NanoGPT(config)
-        
+    if args.modelName == 'pytorch':
+        model = PytorchTransformer(
+            i_dimensions = args.n + 1, 
+            h_dimensions = args.embed_dim, 
+            o_dimensions = 1, 
+            num_layers = args.depth, 
+            num_heads = args.num_heads, 
+            dropout = args.dropout,
+            max_seq_length = args.llm_max_length)
+
     model.cuda()
-    print(model)
+    #print(model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, betas = (0.9, 0.999))
     
     
@@ -448,7 +481,7 @@ if 1:
                 
     for epoch in range(1, args.epochs+1):
         print('******** EP = ' +str(epoch)+ ' / ' +str(args.epochs)+ ' *******')
-        
+        #print(model._read_out.weight.data)
         if 1: #train
             split = args.train
             wandb_train_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
@@ -461,7 +494,7 @@ if 1:
             #             "optimizer_state_dict": optimizer.state_dict(),
             #             "train_epoch": epoch}
             #    torch.save(state, state_file)
-            
+
         if 1: #evaluation
             split = 'test1'
             wandb_valid_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)

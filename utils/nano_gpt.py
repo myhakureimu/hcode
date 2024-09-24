@@ -220,6 +220,7 @@ class NanoGPT(nn.Module):
         for pn, p in self.named_parameters():
             if pn.endswith('c_proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
+                #torch.nn.init.normal_(p, mean=0.0, std=0.04/math.sqrt(2 * config.n_layer))
 
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
@@ -289,8 +290,9 @@ class NanoGPT(nn.Module):
                                      ys_b.view(bsize, points, 1)                         # y
                                      ], dim=2)
                           ), dim=2)
-        #print(zs.shape)
+        
         zs = zs.view(bsize, 2 * points, dim+1)
+        
         return zs
     
     def forward2(self, xs, ys, inds=None):
@@ -315,7 +317,7 @@ class NanoGPT(nn.Module):
         x = self.transformer.ln_f(x)
         
         prediction = self._read_out(x)
-        return prediction[:, 0::2, 0]#[:, inds]
+        return prediction[:, 0::2, -1]#[:, inds]
 
     # def forward3(self, xs, ys, inds=None, attention_mask=None):
     #     #if inds is None:
