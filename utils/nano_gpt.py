@@ -184,7 +184,7 @@ class GPTConfig:
     NormAtt: int = 0
     FirstLayerNorm: int = 0
 
-def binary2onehot(input_tensor):
+def label2onehot(input_tensor, dim):
     """
     Converts a binary tensor of shape (batch_size, points, 1) to a one-hot tensor of shape (batch_size, points, 2),
     mapping 0 to [1, 0] and 1 to [0, 1].
@@ -196,7 +196,7 @@ def binary2onehot(input_tensor):
     input_tensor = input_tensor.long()
 
     # One-hot encode
-    one_hot = torch.nn.functional.one_hot(input_tensor, num_classes=2)  # Shape: (batch_size, points, 2)
+    one_hot = torch.nn.functional.one_hot(input_tensor, num_classes=dim)  # Shape: (batch_size, points, 2)
 
     return one_hot
 
@@ -286,10 +286,10 @@ class NanoGPT(nn.Module):
 
     #     return logits, loss
 
-    @staticmethod
-    def _combine2(xs_b, ys_b):
+    #@staticmethod
+    def _combine2(self, xs_b, ys_b):
         """Interleaves the x's and the y's into a single sequence."""
-        bsize, points, dim = xs_b.shape
+        bsize, points = xs_b.shape
         '''
         ys_b_wide = torch.cat(
             (
@@ -309,15 +309,11 @@ class NanoGPT(nn.Module):
         #print('forward')
         #print(xs_b.shape)
         #print(ys_b.shape)
-        zs = torch.stack((torch.cat([torch.zeros([bsize, points, 2], device=ys_b.device), # y
-                                     xs_b,                                               # x
-                                     ], dim=2), # x
-                          torch.cat([binary2onehot(ys_b),                                # y
-                                     torch.zeros_like(xs_b, device=ys_b.device)          # x
-                                     ], dim=2)
+        zs = torch.stack((label2onehot(xs_b, self.config.input_dim), # x
+                          label2onehot(ys_b, self.config.input_dim), # y
                           ), dim=2)
 
-        zs = zs.view(bsize, 2 * points, dim+2)
+        zs = zs.view(bsize, 2 * points, self.config.input_dim).float()
         #print(zs.shape)
         return zs
     
