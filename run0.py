@@ -7,9 +7,9 @@ random_seed = 2023
 prefix = f'python new_exp.py --gpu {gpuIdxStr} --random_seed {random_seed} --wandb 1'
 
 D = {
+    12: [10,2,6],
     4: [2],
     8: [2,6],
-    12: [2,6,10],
 }
 
 # Ensure the folder exists
@@ -19,9 +19,9 @@ if not os.path.exists('txtfiles'):
 for n in D.keys():
     for expo in D[n]:
         hyper_list = [
-            f'--n {n} --m {2**expo} --train train1 --k 129 --llm_max_length 512 --epoch 16',
-            f'--n {n} --m {2**expo} --train train1 --k {n+1} --llm_max_length 512 --epoch 16',
-            f'--n {n} --m {2**expo} --train train2 --k 129 --llm_max_length 512 --epoch 16',
+            f'--n {n} --m {2**expo} --train train1 --k 129 --llm_max_length 512 --epoch 8',
+            f'--n {n} --m {2**expo} --train train1 --k {n+1} --llm_max_length 512 --epoch 8',
+            f'--n {n} --m {2**expo} --train train2 --k 129 --llm_max_length 512 --epoch 8',
         ]
     
         for hyper in hyper_list:

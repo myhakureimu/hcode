@@ -494,7 +494,7 @@ if 1:
             wandb_train_info = train_model(args, split, hmanager, model, optimizer, epoch=epoch)
             if args.wandb:
                 wandb_train_info['global_step'] = epoch
-                wandb.log(wandb_train_info)
+                wandb.log(wandb_train_info, step=epoch, commit=False)
             
             #if epoch % 10 == 0:
             #    state = {"model_state_dict": model.state_dict(), 
@@ -507,19 +507,19 @@ if 1:
             wandb_valid_info = train_model(args, split, hmanager, model, optimizer, epoch=epoch)
             if args.wandb:
                 wandb_valid_info['global_step'] = epoch
-                wandb.log(wandb_valid_info)
+                wandb.log(wandb_valid_info, step=epoch, commit=False)
             
             split = 'test2'
             wandb_valid_info = train_model(args, split, hmanager, model, optimizer, epoch=epoch)
             if args.wandb:
                 wandb_valid_info['global_step'] = epoch
-                wandb.log(wandb_valid_info)
+                wandb.log(wandb_valid_info, step=epoch, commit=False)
 
             split = 'test4'
             wandb_valid_info = train_model(args, split, hmanager, model, optimizer, epoch=epoch)
             if args.wandb:
                 wandb_valid_info['global_step'] = epoch
-                wandb.log(wandb_valid_info)
+                wandb.log(wandb_valid_info, step=epoch, commit=True)
          
         # import pickle
         # exp_record_folder = folder + 'exp_record'
