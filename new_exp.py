@@ -9,8 +9,7 @@ import random
 import numpy as np
 import wandb
 
-from permutation_dataloader import PermutationDataLoader
-
+from new_hmanager import HypothesisManager
 
 matplotlib.rc('text', usetex=True)
 matplotlib.rc('text.latex', preamble=r'\usepackage{amsmath}')
@@ -24,25 +23,25 @@ parser.add_argument('--SigmaRe', default=2, type=int)
 parser.add_argument('--NormAtt', default=0, type=int)
 parser.add_argument('--FirstLayerNorm', default=1, type=int)
 
-parser.add_argument('--wandb', default=0, type=int)
+parser.add_argument('--wandb', default=1, type=int)
 parser.add_argument('--early_stop', default=0, type=int)
 
 #experiment aim
 parser.add_argument('--expName', default='H', type=str)
 
-
+parser.add_argument('--mode', default='binary', type=str, choices=['binary', 'permutation'])
 parser.add_argument('--train', default='train1', type=str)
 parser.add_argument('--n', default=4, type=int)
-parser.add_argument('--m', default=4*3*2*1, type=int)
-parser.add_argument('--k', default=5, type=int)
-print_index = [0,1,2,4,8,16,32,64,128]
+parser.add_argument('--m', default=2**4, type=int)
+parser.add_argument('--k', default=65, type=int)
+print_index = [0,1,2,4,8,16,32,64]
 
 #model section
 parser.add_argument('--modelName', default='dual', type=str)
 parser.add_argument('--scale', default=1, type=int, help='scale')
-parser.add_argument('--num_heads', default=2*4, type=int, help='number of heads for multi-headed attention (default: 8)')
+parser.add_argument('--num_heads', default=2, type=int, help='number of heads for multi-headed attention (default: 8)')
 parser.add_argument('--depth', default=2*4, type=int, help='depth of the transformer architecture (default: 12)')
-parser.add_argument('--embed_dim', default=128*8, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
+parser.add_argument('--embed_dim', default=128, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
 parser.add_argument('--dropout', default=0.0, type=float, help='dropout')
 
 parser.add_argument('--llm_max_length', default=256, type=int, help='maximum sequence length of the input (default: 11)')
@@ -175,19 +174,19 @@ class FocalLoss(nn.Module):
 if args.train == 'train1':
     print_index = print_index
 
-def train_model(args, split, HManager, model, optimizer, epoch):
+def train_model(args, split, hmanager, model, optimizer, epoch):
     if split == 'train1':
-        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
     if split == 'train2':
-        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
     if split == 'test1':
-        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=None)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=None)
     if split == 'test2':
-        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=2)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=2)
     if split == 'test4':
-        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=4)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=4)
     if split == 'test8':
-        dataloader = HManager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=8)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=8)
     
     #loss_f = FocalLoss(reduction = 'none') #
     #loss_f = torch.nn.BCEWithLogitsLoss(reduction = 'none')
@@ -378,23 +377,37 @@ if 1:
              +'_'+ 'Step='+str(args.n_steps) \
              +'_'+ 'EP='+str(args.epochs)
     
+    
+    # Initialize the data loader
+    print(args.n, args.m, args.k, args.n_steps)
+    hmanager = HypothesisManager(mode=args.mode, n=args.n, m=args.m, random_seed=args.random_seed, k=args.k, n_steps=args.n_steps)
+
+    # alpha = [1]*hmanager.total_h
+    # prob_h = np.random.dirichlet(alpha, size=None)
+    # print(prob_h)
+
+    # alpha = [1]*hmanager.total_features
+    # prob_x = np.random.dirichlet(alpha, size=None)
+    # print(prob_h)
+    
+    # hmanager.set_probability_vectors(prob_h=prob_h, prob_x=prob_x)
+
+
     # wandb
     if args.wandb:
         wandb.login(key='0e030fcc130348fb3127f6140ac82c773fa4b4d9')
         
         if args.train == 'train1':
-            name = f'method={args.train} k={args.k} seed={args.random_seed}'
+            name = f'method={args.train} k={args.k}'
         if args.train == 'train2':
-            name = f'method={args.train} seed={args.random_seed}'
+            name = f'method={args.train}'
         run = wandb.init(
             # Set the project where this run will be logged
-            project= f'{args.expName} n={args.n} m={args.m}|{2**args.n}',
+            project= f'{args.expName} mode={args.mode} n={args.n} m={args.m}|{hmanager.num_all_h}',
             name = name,
             dir='../wandb',
             # Track hyperparameters and run metadata
             config={
-                'n(feature)': args.n,
-                'm(subsample)': args.m,
                 'seed': args.random_seed,
                 'k': args.k,
                 'train': args.train,
@@ -421,32 +434,18 @@ if 1:
     if not os.path.exists(folder):
         os.makedirs(folder)
     
-    # Initialize the data loader
-    print(args.n, args.m, args.k, args.n_steps)
-    HManager = PermutationDataLoader(n=args.n, m=args.m, random_seed=args.random_seed, k=args.k, n_steps=args.n_steps)
-
-    # alpha = [1]*HManager.total_h
-    # prob_h = np.random.dirichlet(alpha, size=None)
-    # print(prob_h)
-
-    # alpha = [1]*HManager.total_features
-    # prob_x = np.random.dirichlet(alpha, size=None)
-    # print(prob_h)
-    
-    # HManager.set_probability_vectors(prob_h=prob_h, prob_x=prob_x)
-    
     # model
     if args.modelName == 'dual': #dual
         model = TransformerModel(
-            n_dims=args.n+1,
-            n_positions=128, 
-            n_embd=args.embed_dim,
-            n_layer=args.depth, 
-            n_head=args.num_heads
+            n_dims = hmanager.tokens,
+            n_positions = args.llm_max_length, 
+            n_embd = args.embed_dim,
+            n_layer = args.depth, 
+            n_head = args.num_heads
         )
     if args.modelName == 'nano': #nanoGPT
         config = GPTConfig(
-            input_dim = args.n + 1,
+            input_dim = hmanager.tokens,
             block_size = args.llm_max_length,
             #vocab_size = 50304, # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
             n_layer = args.depth,
@@ -461,9 +460,9 @@ if 1:
         model = NanoGPT(config)
     if args.modelName == 'pytorch':
         model = PytorchTransformer(
-            i_dimensions = args.n + 1, 
+            i_dimensions = hmanager.tokens, 
             h_dimensions = args.embed_dim, 
-            o_dimensions = args.n + 1, 
+            o_dimensions = hmanager.tokens, 
             num_layers = args.depth, 
             num_heads = args.num_heads, 
             dropout = args.dropout,
@@ -482,7 +481,7 @@ if 1:
     # print('******** EP = ' +str(0)+ ' / ' +str(args.epochs)+ ' *******')
     # epoch = 0
     # split = 'test'
-    # wandb_valid_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
+    # wandb_valid_info = train_model(args, split, hmanager, model, optimizer, epoch=epoch)
     # if args.wandb:
     #     wandb_valid_info['global_step'] = epoch
     #     wandb.log(wandb_valid_info)
@@ -492,7 +491,7 @@ if 1:
         #print(model._read_out.weight.data)
         if 1: #train
             split = args.train
-            wandb_train_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
+            wandb_train_info = train_model(args, split, hmanager, model, optimizer, epoch=epoch)
             if args.wandb:
                 wandb_train_info['global_step'] = epoch
                 wandb.log(wandb_train_info)
@@ -505,19 +504,19 @@ if 1:
 
         if 1: #evaluation
             split = 'test1'
-            wandb_valid_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
+            wandb_valid_info = train_model(args, split, hmanager, model, optimizer, epoch=epoch)
             if args.wandb:
                 wandb_valid_info['global_step'] = epoch
                 wandb.log(wandb_valid_info)
             
             split = 'test2'
-            wandb_valid_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
+            wandb_valid_info = train_model(args, split, hmanager, model, optimizer, epoch=epoch)
             if args.wandb:
                 wandb_valid_info['global_step'] = epoch
                 wandb.log(wandb_valid_info)
 
             split = 'test4'
-            wandb_valid_info = train_model(args, split, HManager, model, optimizer, epoch=epoch)
+            wandb_valid_info = train_model(args, split, hmanager, model, optimizer, epoch=epoch)
             if args.wandb:
                 wandb_valid_info['global_step'] = epoch
                 wandb.log(wandb_valid_info)

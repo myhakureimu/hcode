@@ -2,13 +2,15 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 import itertools
+import math
 
-class PermutationDataLoader:
-    def __init__(self, n, m, random_seed, k, n_steps, prob_h=None, prob_x=None):
+class HypothesisManager:
+    def __init__(self, mode, n, m, random_seed, k, n_steps, prob_h=None, prob_x=None):
         """
         Initializes the PermutationDataLoader with the specified parameters.
 
         Parameters:
+        - mode (str): 'permutation' or 'binary'
         - n (int): Number of elements in the permutations.
         - m (int): Number of permutations to sample from all n! permutations.
         - random_seed (int): Random seed for reproducibility.
@@ -17,6 +19,7 @@ class PermutationDataLoader:
         - prob_h (np.array): Optional custom probability vector for h.
         - prob_x (np.array): Optional custom probability vector for positions (x).
         """
+        self.mode = mode
         self.n = n
         self.m = m
         self.random_seed = random_seed
@@ -24,7 +27,7 @@ class PermutationDataLoader:
         self.n_steps = n_steps
 
         # Generate h and identifying x matrices
-        self.h_matrix, self.identifying_x_matrix = self._generate_h()
+        self.h_matrix, self.identifying_x_matrix, self.num_all_h, self.tokens = self._generate_h(mode, n)
 
         # Create probability vectors
         self.prob_h, self.prob_x = self._create_probability_vectors(prob_h, prob_x)
@@ -33,29 +36,59 @@ class PermutationDataLoader:
         self.total_h = len(self.h_matrix)
         self.total_positions = n  # Positions from 0 to n-1
 
-    def _generate_h(self):
+    def _generate_h(self, mode, n):
         """
-        Generates the h matrix (list of permutations) and the identifying x matrix.
+        Generates the h matrix (list of permutations or binary combinations) and the identifying x matrix.
         """
-        n = self.n
-        # Generate all permutations
-        all_perms = list(itertools.permutations(range(0, n)))
-        num_all_h = len(all_perms)
+        if mode == 'permutation':
+            # Generate all permutations
+            all_perms = list(itertools.permutations(range(0, n)))
+            num_all_h = len(all_perms) # Should be n!
+            if num_all_h != math.factorial(n):
+                raise Exception('wrong num_all_h')
 
-        if self.m >= num_all_h:
-            h_matrix = all_perms
+            if self.m >= num_all_h:
+                h_matrix = all_perms
+            else:
+                np.random.seed(self.random_seed)
+                indices = np.random.choice(num_all_h, size=self.m, replace=False)
+                h_matrix = [all_perms[i] for i in indices]
+
+            # Convert h_matrix to numpy array
+            h_matrix = np.array(h_matrix)  # Shape: (m, n)
+
+            # Calculate identifying_x_matrix
+            identifying_x_matrix = self._calculate_identifying_x(h_matrix)
+
+            tokens = n + 1  # Since labels range from 0 to n-1, maximum label is n-1, padding value is n, so tokens = n+1.
+
+        elif mode == 'binary':
+            # Generate all combinations of n positions with labels n+1 and n+2
+            labels = [n+1, n+2]
+            all_combinations = list(itertools.product(labels, repeat=n))
+            num_all_h = len(all_combinations)  # Should be 2^n
+            if num_all_h != (2**n):
+                raise Exception('wrong num_all_h')
+            
+            if self.m >= num_all_h:
+                h_matrix = all_combinations
+            else:
+                np.random.seed(self.random_seed)
+                indices = np.random.choice(num_all_h, size=self.m, replace=False)
+                h_matrix = [all_combinations[i] for i in indices]
+
+            # Convert h_matrix to numpy array
+            h_matrix = np.array(h_matrix)  # Shape: (m, n)
+
+            # Calculate identifying_x_matrix
+            identifying_x_matrix = self._calculate_identifying_x(h_matrix)
+
+            tokens = n + 3  # Since labels are n+1 and n+2, maximum label is n+2, so tokens = n+3.
+
         else:
-            np.random.seed(self.random_seed)
-            indices = np.random.choice(num_all_h, size=self.m, replace=False)
-            h_matrix = [all_perms[i] for i in indices]
+            raise ValueError("Invalid mode. Must be 'permutation' or 'binary'.")
 
-        # Convert h_matrix to numpy array
-        h_matrix = np.array(h_matrix)  # Shape: (m, n)
-
-        # Calculate identifying_x_matrix
-        identifying_x_matrix = self._calculate_identifying_x(h_matrix)
-
-        return h_matrix, identifying_x_matrix
+        return h_matrix, identifying_x_matrix, num_all_h, tokens
 
     def _calculate_identifying_x(self, h_matrix):
         """
@@ -472,6 +505,7 @@ def combine2(xs_b, ys_b, dim):
 
 if __name__ == '__main__':
     # Parameters
+    mode = 'binary'
     n = 4  # Number of elements in the permutations
     m = 8  # Number of permutations to sample (6 for all permutations of 3 elements)
     random_seed = 1
@@ -480,12 +514,14 @@ if __name__ == '__main__':
     batch_size = 2  # Number of h per batch
 
     # Initialize the data loader
-    data_loader = PermutationDataLoader(n=n, m=m, random_seed=random_seed, k=k, n_steps=n_steps)
+    hmanager = HypothesisManager(mode=mode, n=n, m=m, random_seed=random_seed, k=k, n_steps=n_steps)
 
+    print('H sampling')
+    print(hmanager.m, hmanager.num_all_h)
     print("Hypotheses (h_matrix):")
-    print(data_loader.h_matrix)
+    print(hmanager.h_matrix)
     print("Identifying positions (identifying_x_matrix):")
-    print(data_loader.identifying_x_matrix)
+    print(hmanager.identifying_x_matrix)
 
     # Optionally, set custom probability vectors
     '''
@@ -501,7 +537,7 @@ if __name__ == '__main__':
     '''
 
     # Get train_dataloader2
-    dataloader = data_loader.get_pytorch_dataloader(batch_size=batch_size, dataloader_type='train2', prefix_repeat=1)
+    dataloader = hmanager.get_pytorch_dataloader(batch_size=batch_size, dataloader_type='train2', prefix_repeat=1)
 
     # Iterate through train_dataloader2
     print("-" * 40)
@@ -519,7 +555,7 @@ if __name__ == '__main__':
         print("Y batch:")
         print(y_batch)
         print("Z batch")
-        print(combine2(x_batch, y_batch, data_loader.n+1))
+        print(combine2(x_batch, y_batch, hmanager.tokens))
         print("Mask batch:")
         print(mask_batch)
         print("-" * 40)
