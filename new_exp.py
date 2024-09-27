@@ -23,17 +23,18 @@ parser.add_argument('--SigmaRe', default=2, type=int)
 parser.add_argument('--NormAtt', default=0, type=int)
 parser.add_argument('--FirstLayerNorm', default=1, type=int)
 
-parser.add_argument('--wandb', default=1, type=int)
+parser.add_argument('--wandb', default=0, type=int)
 parser.add_argument('--early_stop', default=0, type=int)
 
 #experiment aim
 parser.add_argument('--expName', default='H', type=str)
 
 parser.add_argument('--mode', default='binary', type=str, choices=['binary', 'permutation'])
-parser.add_argument('--train', default='train1', type=str)
+parser.add_argument('--train', default='train3', type=str)
+parser.add_argument('--mix_prob_train1', default=0.5, type=float)
 parser.add_argument('--n', default=4, type=int)
 parser.add_argument('--m', default=2**4, type=int)
-parser.add_argument('--k', default=65, type=int)
+parser.add_argument('--k', default=5, type=int)
 print_index = [0,1,2,4,8,16,32,64]
 
 #model section
@@ -175,24 +176,23 @@ if args.train == 'train1':
     print_index = print_index
 
 def train_model(args, split, hmanager, model, optimizer, epoch):
-    if split == 'train1':
-        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
-    if split == 'train2':
-        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None)
+    wandb_info = None
+    if split in ['train1', 'train2', 'train3']:
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type=split, prefix_repeat=None, mix_prob_train1 = args.mix_prob_train1)
     if split == 'test1':
-        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=None)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=None, mix_prob_train1 = args.mix_prob_train1)
     if split == 'test2':
-        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=2)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=2, mix_prob_train1 = args.mix_prob_train1)
     if split == 'test4':
-        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=4)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=4, mix_prob_train1 = args.mix_prob_train1)
     if split == 'test8':
-        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=8)
+        dataloader = hmanager.get_pytorch_dataloader(batch_size=args.batch_size, dataloader_type='test', prefix_repeat=8, mix_prob_train1 = args.mix_prob_train1)
     
     #loss_f = FocalLoss(reduction = 'none') #
     #loss_f = torch.nn.BCEWithLogitsLoss(reduction = 'none')
     loss_f = torch.nn.CrossEntropyLoss(reduction = 'none')
     
-    if split in ['train1', 'train2']:
+    if split in ['train1', 'train2', 'train3']:
         batch_time = AverageMeter()
         batch_loss = AverageMeter()
         batch_acc_ = AverageMeter()
@@ -205,7 +205,7 @@ def train_model(args, split, hmanager, model, optimizer, epoch):
         model.eval()
     
     #D = {}
-    if split in ['train1', 'train2']:
+    if split in ['train1', 'train2', 'train3']:
         for xs, ys, hs, idendify_xs, masks in (pbar := tqdm(dataloader)):
             # print(hs)
             # print(xs)
@@ -269,7 +269,7 @@ def train_model(args, split, hmanager, model, optimizer, epoch):
             print('train/acc_:', batch_acc__icl.avg)
     
     #print(D)
-    if split in ['train1', 'train2']:
+    if split in ['train1', 'train2', 'train3']:
         with torch.no_grad():
             for xs, ys, hs, idendify_xs, masks in (pbar := tqdm(dataloader)):
                 
@@ -397,7 +397,7 @@ if 1:
     if args.wandb:
         wandb.login(key='0e030fcc130348fb3127f6140ac82c773fa4b4d9')
         
-        if args.train == 'train1':
+        if args.train in ['train1', 'train3']:
             name = f'method={args.train} k={args.k}'
         if args.train == 'train2':
             name = f'method={args.train}'
@@ -411,6 +411,7 @@ if 1:
                 'seed': args.random_seed,
                 'k': args.k,
                 'train': args.train,
+                'mix_prob_train1': args.mix_prob_train1,
                 'depth': args.depth,
                 'dim': args.embed_dim,
                 'heads': args.num_heads,

@@ -7,10 +7,9 @@ random_seed = 2025
 prefix = f'python new_exp.py --gpu {gpuIdxStr} --random_seed {random_seed} --wandb 1 --mode binary'
 
 D = {
-    3: [2**3],
-    6: [2**3, 2**6],
-    9: [2**3, 2**6, 2**9],
-    12: [2**3, 2**6, 2**9, 2**12],
+    4: [2**4],
+    8: [2**4, 2**8],
+    12: [2**4, 2**8, 2**12],
 }
 
 # Ensure the folder exists
@@ -20,9 +19,11 @@ if not os.path.exists('txtfiles'):
 for n in D.keys():
     for expo in D[n]:
         hyper_list = [
-            f'--n {n} --m {expo} --train train1 --k 129 --llm_max_length 512 --epoch 8',
-            f'--n {n} --m {expo} --train train1 --k {n+1} --llm_max_length 512 --epoch 8',
-            f'--n {n} --m {expo} --train train2 --k 129 --llm_max_length 512 --epoch 8',
+            # f'--n {n} --m {expo} --train train1 --k 129 --llm_max_length 512 --epoch 8',
+            # f'--n {n} --m {expo} --train train1 --k {n+1} --llm_max_length 512 --epoch 8',
+            # f'--n {n} --m {expo} --train train2 --k 129 --llm_max_length 512 --epoch 8',
+            f'--n {n} --m {expo} --train train3 --k {n+1} --llm_max_length 512 --epoch 8',
+            f'--n {n} --m {expo} --train train3 --k 129 --llm_max_length 512 --epoch 8',
         ]
     
         for hyper in hyper_list:

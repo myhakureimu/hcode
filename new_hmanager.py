@@ -202,7 +202,7 @@ class HypothesisManager:
         """
         self.prob_h, self.prob_x = self._create_probability_vectors(prob_h, prob_x)
 
-    def get_pytorch_dataloader(self, batch_size=1, dataloader_type='train1', prefix_repeat=None):
+    def get_pytorch_dataloader(self, batch_size=1, dataloader_type='train1', prefix_repeat=None, mix_prob_train1=None):
         """
         Creates a PyTorch DataLoader using the h and probabilities.
 
@@ -457,6 +457,92 @@ class HypothesisManager:
 
                 return x_batch, y_batch, h_batch, i_batch, mask_batch
 
+        elif dataloader_type == 'train3':
+            # New data loader that combines 'train1' and 'train2' samples
+            def collate_fn(indices):
+                x_batch = []
+                y_batch = []
+                h_batch = []
+                i_batch = []
+                mask_batch = []
+
+                for idx in indices:
+                    # Randomly decide whether to process as 'train1' or 'train2'
+                    is_train1 = np.random.rand() < mix_prob_train1
+
+                    # Common code for both 'train1' and 'train2'
+                    h = self.h_matrix[idx]
+                    identifying_x = self.identifying_x_matrix[idx]
+                    h_batch.append(h)
+                    i_batch.append(identifying_x)
+
+                    x_sequence = []
+                    y_sequence = []
+                    mask_sequence = []
+
+                    if is_train1:
+                        # Process as 'train1'
+                        # Sample k position indices according to prob_x with replacement
+                        position_indices = np.random.choice(
+                            self.n, size=self.k, replace=True, p=self.prob_x
+                        )
+
+                        for position_index in position_indices:
+                            y = h[position_index]
+                            x = position_index
+                            x_sequence.append(x)
+                            y_sequence.append(y)
+                            mask_sequence.append(1)  # Mask 1 for sampled x
+                    else:
+                        # Process as 'train2'
+                        # Get indices where identifying_x is 1
+                        position_indices = np.where(identifying_x == 1)[0]
+                        np.random.shuffle(position_indices)
+
+                        for position_index in position_indices:
+                            y = h[position_index]
+                            x = position_index
+                            x_sequence.append(x)
+                            y_sequence.append(y)
+                            mask_sequence.append(0)  # Mask 0 for identifying positions
+
+                        # Sample one additional x based on prob_x
+                        sampled_position_index = np.random.choice(
+                            self.n, p=self.prob_x
+                        )
+                        y = h[sampled_position_index]
+                        x = sampled_position_index
+                        x_sequence.append(x)
+                        y_sequence.append(y)
+                        mask_sequence.append(1)  # Mask 1 for new sampled x
+
+                    x_batch.append(x_sequence)
+                    y_batch.append(y_sequence)
+                    mask_batch.append(mask_sequence)
+
+                # Pad sequences to the maximum length in the batch
+                max_seq_len = max(len(seq) for seq in x_batch)
+                x_batch_padded = []
+                y_batch_padded = []
+                mask_batch_padded = []
+                for x_seq, y_seq, mask_seq in zip(x_batch, y_batch, mask_batch):
+                    pad_len = max_seq_len - len(x_seq)
+                    x_seq_padded = x_seq + [self.n] * pad_len
+                    y_seq_padded = y_seq + [self.n] * pad_len
+                    mask_seq_padded = mask_seq + [0] * pad_len
+                    x_batch_padded.append(x_seq_padded)
+                    y_batch_padded.append(y_seq_padded)
+                    mask_batch_padded.append(mask_seq_padded)
+
+                x_batch = torch.tensor(np.array(x_batch_padded), dtype=torch.long)
+                y_batch = torch.tensor(np.array(y_batch_padded), dtype=torch.long)
+                mask_batch = torch.tensor(np.array(mask_batch_padded), dtype=torch.float32)
+                h_batch = torch.tensor(np.array(h_batch), dtype=torch.long)
+                i_batch = torch.tensor(np.array(i_batch), dtype=torch.long)
+
+                return x_batch, y_batch, h_batch, i_batch, mask_batch
+
+
         else:
             raise ValueError("Invalid dataloader_type. Must be 'train1', 'train2', or 'test'.")
 
@@ -506,10 +592,10 @@ def combine2(xs_b, ys_b, dim):
 if __name__ == '__main__':
     # Parameters
     mode = 'binary'
-    n = 4  # Number of elements in the permutations
-    m = 8  # Number of permutations to sample (6 for all permutations of 3 elements)
+    n = 3  # Number of elements in the permutations
+    m = 6  # Number of permutations to sample (6 for all permutations of 3 elements)
     random_seed = 1
-    k = 3  # Number of x-y pairs per sequence (used in train_dataloader1)
+    k = 5  # Number of x-y pairs per sequence (used in train_dataloader1)
     n_steps = 32  # Number of steps per epoch
     batch_size = 2  # Number of h per batch
 
@@ -537,7 +623,7 @@ if __name__ == '__main__':
     '''
 
     # Get train_dataloader2
-    dataloader = hmanager.get_pytorch_dataloader(batch_size=batch_size, dataloader_type='train2', prefix_repeat=1)
+    dataloader = hmanager.get_pytorch_dataloader(batch_size=batch_size, dataloader_type='train3', prefix_repeat=1, mix_prob_train1=0.5)
 
     # Iterate through train_dataloader2
     print("-" * 40)
