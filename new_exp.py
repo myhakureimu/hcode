@@ -27,7 +27,7 @@ parser.add_argument('--wandb', default=0, type=int)
 parser.add_argument('--early_stop', default=0, type=int)
 
 #experiment aim
-parser.add_argument('--expName', default='H', type=str)
+parser.add_argument('--expName', default='H larger model', type=str)
 
 parser.add_argument('--mode', default='binary', type=str, choices=['binary', 'permutation'])
 parser.add_argument('--train', default='train3', type=str)
@@ -40,9 +40,9 @@ print_index = [0,1,2,4,8,16,32,64]
 #model section
 parser.add_argument('--modelName', default='dual', type=str)
 parser.add_argument('--scale', default=1, type=int, help='scale')
-parser.add_argument('--num_heads', default=2, type=int, help='number of heads for multi-headed attention (default: 8)')
+parser.add_argument('--num_heads', default=2*4, type=int, help='number of heads for multi-headed attention (default: 8)')
 parser.add_argument('--depth', default=2*4, type=int, help='depth of the transformer architecture (default: 12)')
-parser.add_argument('--embed_dim', default=128, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
+parser.add_argument('--embed_dim', default=128*8, type=int, help='embedding dimension of the transformer feature extractor (default: 256)')
 parser.add_argument('--dropout', default=0.0, type=float, help='dropout')
 
 parser.add_argument('--llm_max_length', default=256, type=int, help='maximum sequence length of the input (default: 11)')
@@ -172,7 +172,7 @@ class FocalLoss(nn.Module):
         else:
             return focal_loss
         
-if args.train == 'train1':
+if args.train in ['train1', 'train3']:
     print_index = print_index
 
 def train_model(args, split, hmanager, model, optimizer, epoch):
@@ -261,7 +261,7 @@ def train_model(args, split, hmanager, model, optimizer, epoch):
         
         wandb_info["train/loss"] = batch_loss.avg
         wandb_info["train/acc_"] = batch_acc_.avg
-        if args.train == 'train1':
+        if args.train in ['train1', 'train3']:
             print('train/loss:', batch_loss_icl.avg[print_index])
             print('train/acc_:', batch_acc__icl.avg[print_index])
         else:
@@ -314,7 +314,7 @@ def train_model(args, split, hmanager, model, optimizer, epoch):
             
             wandb_info["valid/loss"] = batch_loss.avg
             wandb_info["valid/acc_"] = batch_acc_.avg
-            if args.train == 'train1':
+            if args.train in ['train1', 'train3']:
                 print('valid/loss:', batch_loss_icl.avg[print_index])
                 print('valid/acc_:', batch_acc__icl.avg[print_index])
             else:
@@ -398,7 +398,7 @@ if 1:
         wandb.login(key='0e030fcc130348fb3127f6140ac82c773fa4b4d9')
         
         if args.train in ['train1', 'train3']:
-            name = f'method={args.train} k={args.k}'
+            name = f'method={args.train} k={args.k} model={args.modelName} dim={args.embed_dim}'
         if args.train == 'train2':
             name = f'method={args.train}'
         run = wandb.init(
@@ -412,6 +412,7 @@ if 1:
                 'k': args.k,
                 'train': args.train,
                 'mix_prob_train1': args.mix_prob_train1,
+                'modelName': args.modelName,
                 'depth': args.depth,
                 'dim': args.embed_dim,
                 'heads': args.num_heads,
